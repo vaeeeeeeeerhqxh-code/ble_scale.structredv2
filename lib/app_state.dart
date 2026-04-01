@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'profile_manager.dart';
 
-/// Одно измерение
 class MeasurementRecord {
   final DateTime date;
   final double weight;
@@ -34,17 +34,10 @@ class MeasurementRecord {
 
   Map<String, dynamic> toJson() => {
     'date': date.toIso8601String(),
-    'weight': weight,
-    'bodyFat': bodyFat,
-    'muscle': muscle,
-    'water': water,
-    'bmi': bmi,
-    'bmr': bmr,
-    'boneMass': boneMass,
-    'visceralFat': visceralFat,
-    'protein': protein,
-    'bodyAge': bodyAge,
-    'bodyHealth': bodyHealth,
+    'weight': weight, 'bodyFat': bodyFat, 'muscle': muscle,
+    'water': water, 'bmi': bmi, 'bmr': bmr, 'boneMass': boneMass,
+    'visceralFat': visceralFat, 'protein': protein,
+    'bodyAge': bodyAge, 'bodyHealth': bodyHealth,
   };
 
   factory MeasurementRecord.fromJson(Map<String, dynamic> j) => MeasurementRecord(
@@ -63,39 +56,81 @@ class MeasurementRecord {
   );
 }
 
-/// Глобальное хранилище — используй AppState.instance везде
 class AppState extends ChangeNotifier {
   static final AppState instance = AppState._();
   AppState._();
 
-  List<MeasurementRecord> _records = [];
-  List<MeasurementRecord> get records => _records;
+  // История по профилям: profileId -> список записей
+  final Map<String, List<MeasurementRecord>> _history = {};
 
-  MeasurementRecord? get latest => _records.isEmpty ? null : _records.last;
+  String get _activeId =>
+      ProfileManager.instance.activeProfile?.id ?? 'default';
 
-  /// Загрузить историю из SharedPreferences
+  List<MeasurementRecord> get records => _history[_activeId] ?? [];
+  MeasurementRecord? get latest => records.isEmpty ? null : records.last;
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('measurement_history') ?? '[]';
-    final list = jsonDecode(raw) as List;
-    _records = list.map((e) => MeasurementRecord.fromJson(e)).toList();
+    // Загружаем историю для всех профилей
+    for (final profile in ProfileManager.instance.profiles) {
+      final raw = prefs.getString('history_${profile.id}') ?? '[]';
+      try {
+        final list = jsonDecode(raw) as List;
+        _history[profile.id] =
+            list.map((e) => MeasurementRecord.fromJson(e)).toList();
+      } catch (_) {
+        _history[profile.id] = [];
+      }
+    }
+
+    // Миграция старой истории
+    final oldRaw = prefs.getString('measurement_history');
+    if (oldRaw != null && _activeId != 'default') {
+      try {
+        final list = jsonDecode(oldRaw) as List;
+        if (list.isNotEmpty && (_history[_activeId]?.isEmpty ?? true)) {
+          _history[_activeId] =
+              list.map((e) => MeasurementRecord.fromJson(e)).toList();
+          await _saveForProfile(_activeId);
+        }
+      } catch (_) {}
+    }
+
     notifyListeners();
   }
 
-  /// Сохранить новое измерение
   Future<void> addRecord(MeasurementRecord record) async {
-    _records.add(record);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'measurement_history',
-      jsonEncode(_records.map((r) => r.toJson()).toList()),
-    );
+    _history[_activeId] ??= [];
+    _history[_activeId]!.add(record);
+    await _saveForProfile(_activeId);
     notifyListeners();
   }
 
-  /// Получить значения конкретного показателя для графика
+  Future<void> _saveForProfile(String profileId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = _history[profileId] ?? [];
+    await prefs.setString(
+      'history_$profileId',
+      jsonEncode(list.map((r) => r.toJson()).toList()),
+    );
+  }
+
+  /// При переключении профиля — перезагрузить данные
+  Future<void> onProfileSwitch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('history_$_activeId') ?? '[]';
+    try {
+      final list = jsonDecode(raw) as List;
+      _history[_activeId] =
+          list.map((e) => MeasurementRecord.fromJson(e)).toList();
+    } catch (_) {
+      _history[_activeId] = [];
+    }
+    notifyListeners();
+  }
+
   List<double> valuesFor(String key) {
-    return _records.map((r) {
+    return records.map((r) {
       switch (key) {
         case 'weight': return r.weight;
         case 'bodyFat': return r.bodyFat;
@@ -113,17 +148,16 @@ class AppState extends ChangeNotifier {
     }).toList();
   }
 
-  /// Получить записи за период
   List<MeasurementRecord> recordsFor(int days) {
     final cutoff = DateTime.now().subtract(Duration(days: days));
-    return _records.where((r) => r.date.isAfter(cutoff)).toList();
+    return records.where((r) => r.date.isAfter(cutoff)).toList();
   }
 
-  /// Изменение в % относительно предыдущего
   String changePercent(String key) {
-    if (_records.length < 2) return '';
-    final prev = valuesFor(key)[_records.length - 2];
-    final curr = valuesFor(key)[_records.length - 1];
+    final vals = valuesFor(key);
+    if (vals.length < 2) return '';
+    final prev = vals[vals.length - 2];
+    final curr = vals[vals.length - 1];
     if (prev == 0) return '';
     final diff = ((curr - prev) / prev * 100);
     final sign = diff >= 0 ? '↑' : '↓';
