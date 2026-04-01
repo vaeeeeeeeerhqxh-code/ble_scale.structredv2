@@ -12,6 +12,7 @@ import 'package:pp_bluetooth_kit_flutter/model/pp_device_model.dart';
 import 'package:pp_bluetooth_kit_flutter/model/pp_device_user.dart';
 import 'package:pp_bluetooth_kit_flutter/model/pp_wifi_result.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ble_scale_app/app_state.dart';
 
 class DeviceIce extends StatefulWidget {
   final PPDeviceModel device;
@@ -99,6 +100,32 @@ class _DeviceIceState extends State<DeviceIce> {
               _measurementStateStr = 'Готово';
               _isMeasuring = false;
               _showResults = true;
+              // Сохраняем в историю
+              final json = dataModel.toJson();
+              final result = BodyAnalyzer.calculate(
+                weight: _weightValue,
+                height: _userProfile.userHeight.toDouble(),
+                age: _userProfile.age,
+                isMale: _userProfile.sex == PPUserGender.male,
+                data: json,
+              );
+
+              if (result.isNotEmpty) {
+                AppState.instance.addRecord(MeasurementRecord(
+                  date: DateTime.now(),
+                  weight: _weightValue,
+                  bodyFat: (result['bodyFat'] ?? 0).toDouble(),
+                  muscle: (result['muscle'] ?? 0).toDouble(),
+                  water: (result['water'] ?? 0).toDouble(),
+                  bmi: (result['bmi'] ?? 0).toDouble(),
+                  bmr: (result['bmr'] ?? 0).toDouble(),
+                  boneMass: (result['boneMass'] ?? 0).toDouble(),
+                  visceralFat: (result['visceralFat'] ?? 0).toDouble(),
+                  protein: (result['protein'] ?? 0).toDouble(),
+                  bodyAge: (result['bodyAge'] ?? 0).toDouble(),
+                  bodyHealth: (result['bodyHealth'] ?? 0).toDouble(),
+                ));
+              }
             } else if (measurementState == PPMeasurementDataState.measuringBodyFat) {
               _measurementStateStr = 'Анализ состава тела...';
               _isMeasuring = true;

@@ -6,6 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'main_screen.dart';
 import 'onboarding_screen.dart';
 
+import 'app_state.dart';
+
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +36,7 @@ Future<void> main() async {
   } catch (e) {
     print("Error loading device settings: $e");
   }
+  await AppState.instance.load();
 
   runApp(const MyApp());
 }
